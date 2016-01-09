@@ -41,7 +41,7 @@ import bs4
 class Mamont():
     def __init__(self, args):
         self._args = args
-        self._links = []
+        self.collected = []
 
     def search(self):
         """ Initializes the search process. """
@@ -55,12 +55,14 @@ class Mamont():
         try:
             # First execute the query to make sure that the search yields results.
             source = self._get_source(url)
-        except(requests.exceptions.RequestException):
-            stderr.write("\rCouldn't establish a connection!\n")
+        except(requests.exceptions.RequestException) as e:
+            stderr.write("\rCouldn't establish a connection! ({0})\n".format(e.message))
             stderr.flush()
             return
 
         if not source:
+            stderr.write("Search query didn't yield any results.\n")
+            stderr.flush()
             return
         if("Sorry, no results for:" in source):
             stderr.write("Search query didn't yield any results.\n")
@@ -79,24 +81,27 @@ class Mamont():
                 links = self._get_ftp_links(source)
                 if len(links) < 1:
                     raise KeyboardInterrupt
-                self._links.extend(links)
-                stderr.write("\rGathered links: {0} - Page: {1}".format(len(self._links), page))
+                self.collected.extend(links)
+                stderr.write("\rGathered links: {0} - Page: {1}".format(len(self.collected), page))
                 stderr.flush()
             except(KeyboardInterrupt, requests.exceptions.Timeout):
+                if(len(self.collected) < 1):
+                    stderr.write("Search query didn't yield any results.\n")
+                    stderr.flush()
                 break
 
         stderr.write("\n")
         stderr.flush()
-        if len(self._links) > 1:
+        if len(self.collected) > 1:
             self._print_results()
 
 
     def _print_results(self):
         """ Filters out unwanted links and prints out the gathered URLs. """
-        self._links = list(set(self._links))
+        self.collected = list(set(self.collected))
         filters = (".ru", ".fr")
         filtered = []
-        for link in self._links:
+        for link in self.collected:
             try:
                 for filter_ in filters:
                     if filter_ in link:
@@ -153,7 +158,7 @@ class Mamont():
 
     def _get_ftp_links(self, source):
         """ This function returns all ftp links of the passed source as a list. """
-        soup = bs4.BeautifulSoup(source)
+        soup = bs4.BeautifulSoup(source, "html.parser")
         links = soup.find_all("a", href=True)
         extracted_links = [x["href"].strip() for x in links if "ftp" in x["href"] if x]
         return extracted_links

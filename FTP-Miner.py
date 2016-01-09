@@ -1,6 +1,8 @@
+#!/usr/bin/python2
 from sys import stderr
 import argparse
 import urlparse
+import copy
 from modules.napalm import Napalm
 from modules.mamont import Mamont
 from modules.filewatcher import Filewatcher
@@ -82,6 +84,7 @@ def main(args):
     if(len(custom_functions) > 0):
         functions = custom_functions
     else:
+        # functions = (napalm, mamont, filewatcher, filemare)
         functions = (napalm, mamont, filewatcher, filemare)
 
     # Start the scraping process
@@ -89,12 +92,16 @@ def main(args):
         try:
             stderr.write("\t-=[ {0} ]=-\n".format(function["name"]))
             stderr.flush()
-            function["func"](args).search()
+            f = function["func"](args)
+            f.search()
+            for l in copy.deepcopy(f.collected):
+                print l
+            raise(KeyboardInterrupt("function done"))
         except(KeyboardInterrupt, EOFError):
-            continue
-
-    stderr.write("\n")
-    stderr.flush()
+            pass
+        finally:
+            stderr.write("\n")
+            stderr.flush()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -116,6 +123,9 @@ if __name__ == "__main__":
                        help="Search on Mamont.")
     parser.add_argument("-na", "--napalm", action="store_true",
                        help="Search on Napalm FTP Indexer.")
+
+    parser.add_argument("-mf", "--movie-filter", action="store_true",
+                        help="Removes unwanted results of a movie extraction.")
 
     args = parser.parse_args()
 

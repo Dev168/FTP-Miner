@@ -1,4 +1,5 @@
 import re
+import copy
 import threading
 import Queue
 import argparse
@@ -17,7 +18,7 @@ import bs4
 #             of their collected data.
 #
 #             If you are interessted in the website and want to make a picture fo
-#             yourself, visit it under the following link: www.searchftps.org
+#             yourself, visit it under the following link: www.searchftps.net
 #
 #             The process looks about like this:
 #
@@ -31,15 +32,15 @@ import bs4
 
 
 class Napalm(threading.Thread):
-    """ Automates the searching and extracting of searchftps.org's encoded ftp links. """
+    """ Automates the searching and extracting of searchftps.net's encoded ftp links. """
     def __init__(self, args):
         threading.Thread.__init__(self)
+        self.collected = set()
         self._queue = Queue.Queue()
         self._stop_flag = False
         self._args = args
         self._session = requests.session()
         self._configure_session()
-        self._gathered = set()
         self._page_no = 0
         self._lock = threading.Lock()
 
@@ -47,7 +48,7 @@ class Napalm(threading.Thread):
     def search(self):
         """ Initializes the search process. """
         try:
-            self._session.get("http://www.searchftps.org/about")
+            self._session.get("http://www.searchftps.net/about")
             # First try to search for the passed keyword to make sure the search
             # yields results.
             source = self._get_source({"mode": "Search", "keyword": self._args.search})
@@ -61,6 +62,10 @@ class Napalm(threading.Thread):
                 return
         except(requests.exceptions.ConnectionError):
             stderr.write("Failed to establish a connection!\n")
+            stderr.flush()
+            return
+        except(requests.exceptions.TooManyRedirects):
+            stderr.write("Site redirected too many times!\n")
             stderr.flush()
             return
         self._start_workers()
@@ -86,11 +91,7 @@ class Napalm(threading.Thread):
                 # will take care of the decryption of the encrypted strings which
                 # reside on the sites the hashes point to.
                 self._fill_queue(search_results)
-                while(self._queue.qsize() > 50):
-                    pass
             except(requests.exceptions.RequestException):
-                stderr.write(e.message+"\n")
-                stderr.flush()
                 break
             except(KeyboardInterrupt, EOFError):
                 self._stop_flag = True
@@ -115,17 +116,13 @@ class Napalm(threading.Thread):
         # to root urls instead of urls pointing to files, thus the amount of links
         # will be way less than without filtering.
         if(self._args.parse):
+            originalCollected = copy.deepcopy(self.collected)
             filtered = set()
-            for url in self._gathered:
+            for url in originalCollected:
                 parse = urlparse.urlparse(url)
                 url = parse.scheme + "://" +parse.netloc + "/"
                 filtered.add(url)
-            self._gathered = filtered
-
-        if(not self._lock.locked()):
-            with self._lock:
-                for url in self._gathered:
-                    print url
+            self.collected = filtered
 
 
     def _fill_queue(self, hashes):
@@ -146,7 +143,7 @@ class Napalm(threading.Thread):
         while self._stop_flag is False:
             # Obtain the source of the hash, and extract the encrypted string.
             # Decrypt it and add it to the results.
-            stderr.write("\rGathered links: {0} - Page: {1}".format(len(self._gathered), self._page_no))
+            stderr.write("\rGathered links: {0} - Page: {1}".format(len(self.collected), self._page_no))
             stderr.flush()
             hash_ = self._queue.get()
             if not hash_:
@@ -160,21 +157,21 @@ class Napalm(threading.Thread):
                 self._stop_flag = True
             if not self._lock.locked():
                 with self._lock:
-                    self._gathered.add(link)
+                    self.collected.add(link)
             self._queue.task_done()
 
 
 
     def _configure_session(self):
         """ Declares the default header information used for each request. """
-        host = "www.searchftps.org"
+        host = "www.searchftps.net"
         user_agent = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64;"+\
                      " rv:27.0) Gecko/20100101 Firefox/27.0"
         accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         accept_language = "en-US,en;q=0.5"
         accept_encoding = "gzip, deflate"
         dnt = "1"
-        referer = "http://www.searchftps.org/"
+        referer = "http://www.searchftps.net/"
 
         headers = {"Host": host, "User-Agent": user_agent, "Accept": accept,
                    "Accept-Language": accept_language,
@@ -211,9 +208,11 @@ class Napalm(threading.Thread):
                                                              data["index"])
             data = {"action": "result", "args": args}
         # Post the configured data to the server
-        req = self._session.post("http://www.searchftps.org/", data=data)
-        if(req.status_code != requests.codes.ok):
-            self._stop_flag = True
+        try:
+            req = self._session.post("http://www.searchftps.net/", data=data)
+            if(req.status_code != requests.codes.ok):
+                return
+        except requests.exceptions.RequestException:
             return
 
         return req.text.encode("utf8", errors="ignore")
@@ -221,7 +220,7 @@ class Napalm(threading.Thread):
 
     def _extract_search_results(self, source):
         """ Extracts the search results of the passed source, returns them in a list. """
-        soup = bs4.BeautifulSoup(source)
+        soup = bs4.BeautifulSoup(source, "html.parser")
         search_results = []
 
         # Filter out each 'p' tag and for each p tag search for 'a' tags

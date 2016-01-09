@@ -3,6 +3,7 @@ from sys import stderr, exit
 import urlparse
 import requests
 import bs4
+import re
 #
 #
 #   Title:  filemare.py
@@ -21,20 +22,22 @@ class Filemare(object):
         self._session = requests.Session()
         self._get_default_headers()
         self._get_session()
-        self._collected = []
+        self.collected = []
 
     def _filter(self, source):
         """ Searches the passed source for FTP links, adds them to the list of
             gathered links. """
-        soup = bs4.BeautifulSoup(source)
+        soup = bs4.BeautifulSoup(source, "html.parser")
         gathered_links = []
-        links = soup.find_all("div", attrs={"class": "f"})
-        for link in links:
-            if not link:
+        divs = soup.find_all("div", attrs={"class": "descr"})
+        for div in divs:
+            try:
+                link_raw = div.a.get("href")
+                match = re.search(r"^(\/\w\w)?/browse\/(.*)$", link_raw).group(2)
+                link = "ftp://" + match.encode("utf8", errors="replace")
+                gathered_links.append(link)
+            except(ValueError, AttributeError):
                 continue
-            elif "ftp://" not in link.get_text():
-                continue
-            gathered_links.append(link.get_text().encode("utf8", errors="replace"))
 
         return gathered_links
 
@@ -48,10 +51,10 @@ class Filemare(object):
         """ Gets the source code of the passed url and returns it. """
         try: # Make the get request and return the source code
             if(self._args.cloak):
-                request = self._session.get(url, proxies={"http": "http://" + self._args.cloak},
-                                            timeout=10)
+                proxies_ = {"http": "http://" + self._args.cloak}
+                request = self._session.get(url, proxies=proxies_, timeout=10)
             else:
-                request = self._session.get(url, timeout=10)
+                request = self._session.get(url, timeout=5)
         except(requests.exceptions.ConnectionError):
             stderr.write("Failed to connect to filemare.com!\n")
             stderr.flush()
@@ -62,7 +65,7 @@ class Filemare(object):
             if(self._args.cloak):
                 stderr.write("Make sure your proxy is alive")
                 stderr.flush()
-            return
+            exit(1)
         else:
             return request.text.encode("utf8", errors="ignore")
 
@@ -84,12 +87,10 @@ class Filemare(object):
         """ Gets the session cookie and checks if the search result yields results. """
         try:
             self._session.get(self._built_url)
+            return
         except(requests.exceptions.RequestException):
             stderr.write("Failed to establish a connection!\n")
             stderr.flush()
-        else:
-            return
-
         exit(1)
 
     def search(self):
@@ -109,7 +110,7 @@ class Filemare(object):
                     raise ValueError("Search query didn't yield any results.")
                 elif("You have reached hourly free access limits." in source or
                      "You have reached daily free access limits." in source):
-                    if(len(self._collected) > 1):
+                    if(len(self.collected) > 1):
                         raise ValueError("\nFile limit reached, use a proxy!")
                     else:
                         raise ValueError("\rFile limit reached, use a proxy!")
@@ -121,11 +122,11 @@ class Filemare(object):
                     break
                 if(self._args.parse):
                     for url in urls:
-                        self._collected.append(self._parse(url))
-                        self._collected = list(set(self._collected))
+                        self.collected.append(self._parse(url))
+                        self.collected = list(set(self.collected))
                 else:
-                    self._collected.extend(urls)
-                stderr.write("\rGathered links: {0} - Page: {1}".format(len(self._collected), page_no))
+                    self.collected.extend(urls)
+                stderr.write("\rGathered links: {0} - Page: {1}".format(len(self.collected), page_no))
                 stderr.flush()
         except(ValueError) as e:
             stderr.write(e.message)
@@ -133,11 +134,6 @@ class Filemare(object):
         except(requests.exceptions.RequestException):
             pass
 
-        stderr.write("\n")
-        stderr.flush()
-
         # Distinct the search results and print them to stdout
-        self._collected = list(set(self._collected))
-        for link in self._collected:
-            print link
+        self.collected = list(set(self.collected))
 

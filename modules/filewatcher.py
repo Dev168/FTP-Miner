@@ -21,7 +21,7 @@ class Filewatcher(object):
     def _filter(self, source):
         """ Searches the passed source for FTP links, adds them to the list of
             gathered links. """
-        soup = bs4.BeautifulSoup(source)
+        soup = bs4.BeautifulSoup(source, "html.parser")
         gathered_links = []
         for element in soup.find_all("div", attrs={"class": "listing"}):
             links = element.find_all("a", href=True)
@@ -95,14 +95,9 @@ class Filewatcher(object):
             stderr.flush()
         except(KeyboardInterrupt, EOFError):
             pass
-        finally:
-            stderr.write("\n")
-            stderr.flush()
-
-
+        stderr.write("\n")
+        stderr.flush()
 
         # Distinct the search results and print them to stdout
         self.collected = set(self.collected)
-        for link in self.collected:
-            print link
 
